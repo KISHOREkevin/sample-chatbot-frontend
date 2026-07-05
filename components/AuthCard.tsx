@@ -1,12 +1,16 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useAppDispatch } from '@/redux/store';
+import { loginUserThunk, registerUserThunk, otpVerifyThunk, forgotPasswordThunk, verifyResetOtpThunk, resetPasswordThunk, resendRegistrationOtpThunk } from '@/redux/slices/authSlice';
+import { Eye, EyeOff } from 'lucide-react';
 
 interface AuthCardProps {
   onAuthSuccess: () => void;
 }
 
 export const AuthCard: React.FC<AuthCardProps> = ({ onAuthSuccess }) => {
+  const dispatch = useAppDispatch();
   const [authLoading, setAuthLoading] = useState(false);
   const [authMode, setAuthMode] = useState<'idle' | 'email-password'>('idle');
   const [authSubMode, setAuthSubMode] = useState<'login' | 'register' | 'forgot' | 'register-otp' | 'forgot-otp' | 'reset-password'>('login');
@@ -17,9 +21,69 @@ export const AuthCard: React.FC<AuthCardProps> = ({ onAuthSuccess }) => {
   const [passwordInput, setPasswordInput] = useState('');
   const [confirmPasswordInput, setConfirmPasswordInput] = useState('');
   const [otpInput, setOtpInput] = useState('');
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   
   const [authError, setAuthError] = useState('');
   const [authSuccess, setAuthSuccess] = useState('');
+
+  // OTP Countdown Timer State & Effects
+  const [timeLeft, setTimeLeft] = useState<number>(0);
+
+  useEffect(() => {
+    if (timeLeft <= 0) return;
+    const interval = setInterval(() => {
+      setTimeLeft((prev) => prev - 1);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [timeLeft]);
+
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const getOtpRemainingTime = (otpCreatedAt: string | undefined | null): number => {
+    if (!otpCreatedAt) return 300;
+    const hasTimezone = otpCreatedAt.endsWith('Z') || /([+-]\d{2}:?\d{2})$/.test(otpCreatedAt);
+    const dateStr = hasTimezone ? otpCreatedAt : `${otpCreatedAt}Z`;
+    const elapsed = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
+    return Math.max(0, 300 - elapsed);
+  };
+
+  const handleResendRegistrationOtp = async () => {
+    setAuthError('');
+    setAuthSuccess('');
+    setAuthLoading(true);
+    try {
+      const response = await dispatch(resendRegistrationOtpThunk({ email: emailInput })).unwrap();
+      setAuthSuccess('A new verification code has been dispatched to your email.');
+      setOtpInput('');
+      setTimeLeft(getOtpRemainingTime(response.otp_created_at));
+      setAuthLoading(false);
+    } catch (err: any) {
+      setAuthError(err);
+      setAuthLoading(false);
+    }
+  };
+
+  const handleResendForgotOtp = async () => {
+    setAuthError('');
+    setAuthSuccess('');
+    setAuthLoading(true);
+    try {
+      const response = await dispatch(forgotPasswordThunk({ email: emailInput })).unwrap();
+      setAuthSuccess('A new password reset token has been dispatched.');
+      setOtpInput('');
+      setTimeLeft(getOtpRemainingTime(response.otp_created_at));
+      setAuthLoading(false);
+    } catch (err: any) {
+      setAuthError(err);
+      setAuthLoading(false);
+    }
+  };
 
   // Handle Google OAuth simulation
   const handleGoogleAuth = () => {
@@ -27,13 +91,12 @@ export const AuthCard: React.FC<AuthCardProps> = ({ onAuthSuccess }) => {
     setAuthError('');
     setAuthSuccess('');
     setTimeout(() => {
-      setAuthLoading(false);
       onAuthSuccess();
     }, 1200);
   };
 
   // Handle Email/Password form submit validations
-  const handleEmailPasswordSubmit = (e: React.FormEvent) => {
+  const handleEmailPasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError('');
     setAuthSuccess('');
@@ -48,10 +111,25 @@ export const AuthCard: React.FC<AuthCardProps> = ({ onAuthSuccess }) => {
         return;
       }
       setAuthLoading(true);
-      setTimeout(() => {
-        setAuthLoading(false);
+      try {
+        await dispatch(loginUserThunk({ email: emailInput, password: passwordInput })).unwrap();
         onAuthSuccess();
-      }, 1200);
+      } catch (err: any) {
+        const errorMsg = typeof err === 'object' && err.error ? err.error : err;
+        if (errorMsg === 'User not verified') {
+          setAuthSuccess('Your account is not verified yet. Please enter the verification code sent to your email.');
+          setAuthSubMode('register-otp');
+          setOtpInput('');
+          if (typeof err === 'object' && err.otp_created_at) {
+            setTimeLeft(getOtpRemainingTime(err.otp_created_at));
+          } else {
+            setTimeLeft(300);
+          }
+        } else {
+          setAuthError(errorMsg);
+        }
+        setAuthLoading(false);
+      }
     } else if (authSubMode === 'register') {
       if (!nameInput.trim() || !emailInput.trim() || !passwordInput.trim() || !confirmPasswordInput.trim()) {
         setAuthError('All fields are required');
@@ -70,65 +148,96 @@ export const AuthCard: React.FC<AuthCardProps> = ({ onAuthSuccess }) => {
         return;
       }
       setAuthLoading(true);
-      setTimeout(() => {
+      try {
+        const response = await dispatch(registerUserThunk({
+          email: emailInput,
+          full_name: nameInput,
+          password: passwordInput,
+          avatar: avatarFile
+        })).unwrap();
+
         setAuthSuccess('Registration successful! A 6-digit verification code has been dispatched to your email.');
         setAuthSubMode('register-otp');
         setOtpInput('');
+        setTimeLeft(getOtpRemainingTime(response.otp_created_at));
         setAuthLoading(false);
-      }, 1500);
+      } catch (err: any) {
+        setAuthError(err);
+        setAuthLoading(false);
+      }
     } else if (authSubMode === 'forgot') {
       if (!emailInput.trim() || !emailInput.includes('@')) {
         setAuthError('Please enter a valid email address');
         return;
       }
       setAuthLoading(true);
-      setTimeout(() => {
+      try {
+        const response = await dispatch(forgotPasswordThunk({ email: emailInput })).unwrap();
         setAuthSuccess('A secure password reset verification code has been dispatched to your email.');
         setAuthSubMode('forgot-otp');
         setOtpInput('');
+        setTimeLeft(getOtpRemainingTime(response.otp_created_at));
         setAuthLoading(false);
-      }, 1200);
+      } catch (err: any) {
+        setAuthError(err);
+        setAuthLoading(false);
+      }
     }
   };
 
-  const handleRegisterOtpSubmit = (e: React.FormEvent) => {
+  const handleRegisterOtpSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError('');
     setAuthSuccess('');
 
-    if (otpInput.trim() !== '123456') {
-      setAuthError('Invalid verification code. Please try 123456.');
+    if (!otpInput.trim() || otpInput.length !== 6) {
+      setAuthError('Please enter a 6-digit verification code.');
       return;
     }
 
     setAuthLoading(true);
-    setTimeout(() => {
+    try {
+      await dispatch(otpVerifyThunk({
+        email: emailInput,
+        otp_code: otpInput
+      })).unwrap();
+      
       setAuthLoading(false);
-      onAuthSuccess();
-    }, 1200);
+      setAuthSubMode('login');
+      setAuthSuccess('Account verified successfully! Please sign in with your password.');
+      setPasswordInput('');
+      setConfirmPasswordInput('');
+    } catch (err: any) {
+      setAuthError(err);
+      setAuthLoading(false);
+    }
   };
 
-  const handleForgotOtpSubmit = (e: React.FormEvent) => {
+  const handleForgotOtpSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError('');
     setAuthSuccess('');
 
-    if (otpInput.trim() !== '123456') {
-      setAuthError('Invalid verification code. Please try 123456.');
+    if (!otpInput.trim() || otpInput.length !== 6) {
+      setAuthError('Please enter a 6-digit verification code.');
       return;
     }
 
     setAuthLoading(true);
-    setTimeout(() => {
+    try {
+      await dispatch(verifyResetOtpThunk({ email: emailInput, otp_code: otpInput })).unwrap();
       setAuthLoading(false);
       setAuthSubMode('reset-password');
       setPasswordInput('');
       setConfirmPasswordInput('');
       setAuthSuccess('Code verified successfully! Please define your new password.');
-    }, 1200);
+    } catch (err: any) {
+      setAuthError(err);
+      setAuthLoading(false);
+    }
   };
 
-  const handleResetPasswordSubmit = (e: React.FormEvent) => {
+  const handleResetPasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError('');
     setAuthSuccess('');
@@ -147,13 +256,21 @@ export const AuthCard: React.FC<AuthCardProps> = ({ onAuthSuccess }) => {
     }
 
     setAuthLoading(true);
-    setTimeout(() => {
+    try {
+      await dispatch(resetPasswordThunk({
+        email: emailInput,
+        otp_code: otpInput,
+        new_password: passwordInput
+      })).unwrap();
       setAuthLoading(false);
       setAuthSubMode('login');
       setAuthSuccess('Password reset successful! Please sign in with your new password.');
       setPasswordInput('');
       setConfirmPasswordInput('');
-    }, 1500);
+    } catch (err: any) {
+      setAuthError(err);
+      setAuthLoading(false);
+    }
   };
 
   return (
@@ -176,7 +293,7 @@ export const AuthCard: React.FC<AuthCardProps> = ({ onAuthSuccess }) => {
             </div>
           </div>
           <h1 className="text-3xl font-bold tracking-tight text-white bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent">
-            Aegis AI Chat
+            Chatty AI Chat
           </h1>
           <p className="text-sm text-zinc-400 mt-2">
             {authMode === 'idle' 
@@ -303,25 +420,27 @@ export const AuthCard: React.FC<AuthCardProps> = ({ onAuthSuccess }) => {
                     </div>
                   </div>
                   <label className="block text-[10px] font-semibold text-zinc-400 uppercase tracking-wider text-center mb-2">
-                    Verification Code
+                    Verification Code {timeLeft > 0 ? `(Expires in ${formatTime(timeLeft)})` : <span className="text-rose-400 font-bold">(Expired)</span>}
                   </label>
                   <input
                     type="text"
                     maxLength={6}
-                    placeholder="123456"
+                    placeholder="Enter code"
                     value={otpInput}
                     onChange={(e) => setOtpInput(e.target.value.replace(/\D/g, ''))}
                     className="w-full px-4 py-3 bg-slate-900 border border-white/10 rounded-xl text-white placeholder-zinc-700 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors text-center font-mono text-2xl tracking-[0.5em] pl-[0.5em]"
                     autoFocus
                   />
-                  <p className="text-[10px] text-zinc-500 text-center mt-2">
-                    Tip: Enter <span className="text-indigo-400 font-semibold font-mono">123456</span> to simulate validation
-                  </p>
                 </div>
 
                 <button
                   type="submit"
-                  className="w-full py-3 px-4 rounded-xl text-white font-semibold shimmer-button transition-all duration-200 cursor-pointer shadow-lg hover:shadow-indigo-500/20 text-sm mt-2"
+                  disabled={timeLeft <= 0 || authLoading}
+                  className={`w-full py-3 px-4 rounded-xl text-white font-semibold transition-all duration-200 cursor-pointer shadow-lg text-sm mt-2 ${
+                    timeLeft <= 0 
+                      ? 'bg-zinc-800 text-zinc-500 border border-white/5 cursor-not-allowed shadow-none hover:shadow-none' 
+                      : 'shimmer-button hover:shadow-indigo-500/20'
+                  }`}
                 >
                   Verify & Proceed
                 </button>
@@ -329,21 +448,26 @@ export const AuthCard: React.FC<AuthCardProps> = ({ onAuthSuccess }) => {
                 <div className="flex flex-col gap-2.5 pt-2 text-center text-xs">
                   <p className="text-zinc-500">
                     Didn't receive the code?{' '}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setAuthSuccess('A new verification code has been dispatched.');
-                        setOtpInput('');
-                      }}
-                      className="font-semibold text-indigo-400 hover:text-indigo-300 transition-colors cursor-pointer"
-                    >
-                      Resend OTP
-                    </button>
+                    {timeLeft > 0 ? (
+                      <span className="font-semibold text-zinc-600 cursor-not-allowed select-none">
+                        Resend OTP in {formatTime(timeLeft)}
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={handleResendRegistrationOtp}
+                        disabled={authLoading}
+                        className="font-semibold text-indigo-400 hover:text-indigo-300 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Resend OTP
+                      </button>
+                    )}
                   </p>
                   <button
                     type="button"
                     onClick={() => {
                       setAuthSubMode('register');
+                      setTimeLeft(0);
                       setAuthError('');
                       setAuthSuccess('');
                     }}
@@ -370,25 +494,27 @@ export const AuthCard: React.FC<AuthCardProps> = ({ onAuthSuccess }) => {
                     </div>
                   </div>
                   <label className="block text-[10px] font-semibold text-zinc-400 uppercase tracking-wider text-center mb-2">
-                    Security Token
+                    Security Token {timeLeft > 0 ? `(Expires in ${formatTime(timeLeft)})` : <span className="text-rose-400 font-bold">(Expired)</span>}
                   </label>
                   <input
                     type="text"
                     maxLength={6}
-                    placeholder="123456"
+                    placeholder="Enter code"
                     value={otpInput}
                     onChange={(e) => setOtpInput(e.target.value.replace(/\D/g, ''))}
                     className="w-full px-4 py-3 bg-slate-900 border border-white/10 rounded-xl text-white placeholder-zinc-700 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors text-center font-mono text-2xl tracking-[0.5em] pl-[0.5em]"
                     autoFocus
                   />
-                  <p className="text-[10px] text-zinc-500 text-center mt-2">
-                    Tip: Enter <span className="text-indigo-400 font-semibold font-mono">123456</span> to simulate validation
-                  </p>
                 </div>
 
                 <button
                   type="submit"
-                  className="w-full py-3 px-4 rounded-xl text-white font-semibold shimmer-button transition-all duration-200 cursor-pointer shadow-lg hover:shadow-indigo-500/20 text-sm mt-2"
+                  disabled={timeLeft <= 0 || authLoading}
+                  className={`w-full py-3 px-4 rounded-xl text-white font-semibold transition-all duration-200 cursor-pointer shadow-lg text-sm mt-2 ${
+                    timeLeft <= 0 
+                      ? 'bg-zinc-800 text-zinc-500 border border-white/5 cursor-not-allowed shadow-none hover:shadow-none' 
+                      : 'shimmer-button hover:shadow-indigo-500/20'
+                  }`}
                 >
                   Verify Code
                 </button>
@@ -396,21 +522,26 @@ export const AuthCard: React.FC<AuthCardProps> = ({ onAuthSuccess }) => {
                 <div className="flex flex-col gap-2.5 pt-2 text-center text-xs">
                   <p className="text-zinc-500">
                     Didn't receive the code?{' '}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setAuthSuccess('A new password reset token has been dispatched.');
-                        setOtpInput('');
-                      }}
-                      className="font-semibold text-indigo-400 hover:text-indigo-300 transition-colors cursor-pointer"
-                    >
-                      Resend Token
-                    </button>
+                    {timeLeft > 0 ? (
+                      <span className="font-semibold text-zinc-600 cursor-not-allowed select-none">
+                        Resend Token in {formatTime(timeLeft)}
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={handleResendForgotOtp}
+                        disabled={authLoading}
+                        className="font-semibold text-indigo-400 hover:text-indigo-300 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Resend Token
+                      </button>
+                    )}
                   </p>
                   <button
                     type="button"
                     onClick={() => {
                       setAuthSubMode('forgot');
+                      setTimeLeft(0);
                       setAuthError('');
                       setAuthSuccess('');
                     }}
@@ -431,26 +562,44 @@ export const AuthCard: React.FC<AuthCardProps> = ({ onAuthSuccess }) => {
                 {/* Password field */}
                 <div>
                   <label className="block text-[10px] font-semibold text-zinc-400 uppercase tracking-wider mb-1.5">New Password</label>
-                  <input
-                    type="password"
-                    placeholder="••••••••"
-                    value={passwordInput}
-                    onChange={(e) => setPasswordInput(e.target.value)}
-                    className="w-full px-4 py-2.5 bg-slate-900 border border-white/10 rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors text-sm"
-                    autoFocus
-                  />
+                  <div className="relative">
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      placeholder="••••••••"
+                      value={passwordInput}
+                      onChange={(e) => setPasswordInput(e.target.value)}
+                      className="w-full pl-4 pr-10 py-2.5 bg-slate-900 border border-white/10 rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors text-sm"
+                      autoFocus
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer"
+                    >
+                      {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                    </button>
+                  </div>
                 </div>
 
                 {/* Confirm Password field */}
                 <div>
                   <label className="block text-[10px] font-semibold text-zinc-400 uppercase tracking-wider mb-1.5">Confirm New Password</label>
-                  <input
-                    type="password"
-                    placeholder="••••••••"
-                    value={confirmPasswordInput}
-                    onChange={(e) => setConfirmPasswordInput(e.target.value)}
-                    className="w-full px-4 py-2.5 bg-slate-900 border border-white/10 rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors text-sm"
-                  />
+                  <div className="relative">
+                    <input
+                      type={showConfirmPassword ? 'text' : 'password'}
+                      placeholder="••••••••"
+                      value={confirmPasswordInput}
+                      onChange={(e) => setConfirmPasswordInput(e.target.value)}
+                      className="w-full pl-4 pr-10 py-2.5 bg-slate-900 border border-white/10 rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors text-sm"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer"
+                    >
+                      {showConfirmPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                    </button>
+                  </div>
                 </div>
 
                 <button
@@ -465,6 +614,7 @@ export const AuthCard: React.FC<AuthCardProps> = ({ onAuthSuccess }) => {
                     type="button"
                     onClick={() => {
                       setAuthSubMode('login');
+                      setTimeLeft(0);
                       setAuthError('');
                       setAuthSuccess('');
                     }}
@@ -479,17 +629,49 @@ export const AuthCard: React.FC<AuthCardProps> = ({ onAuthSuccess }) => {
                 
                 {/* Name field (Register only) */}
                 {authSubMode === 'register' && (
-                  <div>
-                    <label className="block text-[10px] font-semibold text-zinc-400 uppercase tracking-wider mb-1.5">Full Name</label>
-                    <input
-                      type="text"
-                      placeholder="Alex Carter"
-                      value={nameInput}
-                      onChange={(e) => setNameInput(e.target.value)}
-                      className="w-full px-4 py-2.5 bg-slate-900 border border-white/10 rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors text-sm"
-                      autoFocus
-                    />
-                  </div>
+                  <>
+                    <div>
+                      <label className="block text-[10px] font-semibold text-zinc-400 uppercase tracking-wider mb-1.5">Full Name</label>
+                      <input
+                        type="text"
+                        placeholder="Alex Carter"
+                        value={nameInput}
+                        onChange={(e) => setNameInput(e.target.value)}
+                        className="w-full px-4 py-2.5 bg-slate-900 border border-white/10 rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors text-sm"
+                        autoFocus
+                      />
+                    </div>
+
+                    {/* Avatar Upload (Register only) */}
+                    <div>
+                      <label className="block text-[10px] font-semibold text-zinc-400 uppercase tracking-wider mb-1.5">Avatar Image</label>
+                      <div className="flex items-center gap-3">
+                        <label className="flex-1 flex flex-col items-center justify-center px-4 py-2 bg-slate-900 border border-white/10 border-dashed rounded-xl cursor-pointer hover:border-indigo-500 transition-colors text-xs text-zinc-400 hover:text-zinc-300">
+                          <svg className="w-5 h-5 mb-1 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                          </svg>
+                          <span className="truncate max-w-[180px]">{avatarFile ? avatarFile.name : 'Upload avatar (optional)'}</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={(e) => setAvatarFile(e.target.files?.[0] || null)}
+                            className="hidden"
+                          />
+                        </label>
+                        {avatarFile && (
+                          <button
+                            type="button"
+                            onClick={() => setAvatarFile(null)}
+                            className="p-2.5 text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 rounded-xl transition-colors cursor-pointer border border-rose-500/10"
+                          >
+                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </>
                 )}
 
                 {/* Email field (Always visible in email-password flow) */}
@@ -524,13 +706,22 @@ export const AuthCard: React.FC<AuthCardProps> = ({ onAuthSuccess }) => {
                         </button>
                       )}
                     </div>
-                    <input
-                      type="password"
-                      placeholder="••••••••"
-                      value={passwordInput}
-                      onChange={(e) => setPasswordInput(e.target.value)}
-                      className="w-full px-4 py-2.5 bg-slate-900 border border-white/10 rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors text-sm"
-                    />
+                    <div className="relative">
+                      <input
+                        type={showPassword ? 'text' : 'password'}
+                        placeholder="••••••••"
+                        value={passwordInput}
+                        onChange={(e) => setPasswordInput(e.target.value)}
+                        className="w-full pl-4 pr-10 py-2.5 bg-slate-900 border border-white/10 rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors text-sm"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer"
+                      >
+                        {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                      </button>
+                    </div>
                   </div>
                 )}
 
@@ -538,13 +729,22 @@ export const AuthCard: React.FC<AuthCardProps> = ({ onAuthSuccess }) => {
                 {authSubMode === 'register' && (
                   <div>
                     <label className="block text-[10px] font-semibold text-zinc-400 uppercase tracking-wider mb-1.5">Confirm Password</label>
-                    <input
-                      type="password"
-                      placeholder="••••••••"
-                      value={confirmPasswordInput}
-                      onChange={(e) => setConfirmPasswordInput(e.target.value)}
-                      className="w-full px-4 py-2.5 bg-slate-900 border border-white/10 rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors text-sm"
-                    />
+                    <div className="relative">
+                      <input
+                        type={showConfirmPassword ? 'text' : 'password'}
+                        placeholder="••••••••"
+                        value={confirmPasswordInput}
+                        onChange={(e) => setConfirmPasswordInput(e.target.value)}
+                        className="w-full pl-4 pr-10 py-2.5 bg-slate-900 border border-white/10 rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors text-sm"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer"
+                      >
+                        {showConfirmPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                      </button>
+                    </div>
                   </div>
                 )}
                 
@@ -598,6 +798,7 @@ export const AuthCard: React.FC<AuthCardProps> = ({ onAuthSuccess }) => {
                     type="button"
                     onClick={() => {
                       setAuthMode('idle');
+                      setTimeLeft(0);
                       setAuthError('');
                       setAuthSuccess('');
                     }}

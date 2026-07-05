@@ -2,9 +2,16 @@
 
 import React, { useState } from 'react';
 import { ChatSession } from '../app/sampleData';
+import { PLANS } from './SubscriptionModal';
 
 interface SidebarProps {
-  user: { name: string; email: string; provider: 'google' | 'email-password' };
+  user: { 
+    name: string; 
+    email: string; 
+    provider: 'google' | 'email-password'; 
+    avatar_url?: string | null; 
+    planId?: string;
+  };
   activeChatId: string;
   setActiveChatId: (id: string) => void;
   chats: ChatSession[];
@@ -12,6 +19,7 @@ interface SidebarProps {
   setIsSidebarOpen: (val: boolean) => void;
   handleNewChat: () => void;
   handleLogout: () => void;
+  onOpenSubscription?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -22,7 +30,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isSidebarOpen,
   setIsSidebarOpen,
   handleNewChat,
-  handleLogout
+  handleLogout,
+  onOpenSubscription
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -48,7 +57,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
           </div>
           <div>
-            <h2 className="text-base font-bold text-white tracking-wide">Aegis Core</h2>
+            <h2 className="text-base font-bold text-white tracking-wide">Chatty Core</h2>
             <span className="text-[10px] text-cyan-400 font-semibold tracking-widest uppercase">
               {user.provider === 'google' ? 'Google Client' : 'Verified Member'}
             </span>
@@ -135,9 +144,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
       {/* Identity & Logout panel */}
       <div className="p-4 border-t border-white/5 bg-slate-950/90">
         <div className="flex items-center gap-3 mb-4">
-          <div className="h-10 w-10 rounded-full bg-indigo-600 flex items-center justify-center text-white font-bold tracking-wider text-sm shadow-[0_0_15px_rgba(99,102,241,0.2)]">
-            {user.email.slice(0, 2).toUpperCase()}
-          </div>
+          {user.avatar_url ? (
+            <img
+              src={`${process.env.NEXT_PUBLIC_API_URL}${user.avatar_url}`}
+              alt={user.name}
+              className="h-10 w-10 rounded-full object-cover border border-white/10 shadow-[0_0_15px_rgba(99,102,241,0.2)]"
+            />
+          ) : (
+            <div className="h-10 w-10 rounded-full bg-indigo-600 flex items-center justify-center text-white font-bold tracking-wider text-sm shadow-[0_0_15px_rgba(99,102,241,0.2)]">
+              {user.email.slice(0, 2).toUpperCase()}
+            </div>
+          )}
           <div className="flex-1 min-w-0">
             <p className="text-sm font-semibold text-white truncate">{user.name}</p>
             <div className="flex items-center gap-1.5 mt-0.5">
@@ -145,6 +162,29 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <span className="text-[10px] font-semibold text-emerald-400 uppercase tracking-wide truncate">
                 {user.provider === 'email-password' ? 'Email Verified' : 'Google Verified'}
               </span>
+            </div>
+            <div className="mt-1 flex items-center gap-1.5">
+              {(() => {
+                const activePlan = PLANS.find(p => p.id === user.planId) || PLANS[0];
+                return (
+                  <span className={`text-[9px] font-extrabold px-2 py-0.5 rounded-md uppercase tracking-wider ${
+                    activePlan.id !== 'free' 
+                      ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20' 
+                      : 'bg-zinc-800 text-zinc-400 border border-white/5'
+                  }`}>
+                    {activePlan.name}
+                  </span>
+                );
+              })()}
+              {onOpenSubscription && (
+                <button
+                  type="button"
+                  onClick={onOpenSubscription}
+                  className="text-[9px] font-bold text-indigo-400 hover:text-indigo-300 transition-colors cursor-pointer underline decoration-indigo-500/30"
+                >
+                  Manage
+                </button>
+              )}
             </div>
           </div>
         </div>

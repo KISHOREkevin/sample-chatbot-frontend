@@ -3,15 +3,18 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ChatSession } from '../app/sampleData';
 import { parseMarkdown } from './MarkdownRenderer';
+import { hasPlanFeature } from './SubscriptionModal';
 
 interface ChatPaneProps {
   activeChat: ChatSession;
   isResponding: boolean;
-  selectedModel: 'gemini-2-flash' | 'gemini-2-pro' | 'gemini-1-ultra';
-  setSelectedModel: (val: 'gemini-2-flash' | 'gemini-2-pro' | 'gemini-1-ultra') => void;
+  selectedModel: 'deepseek-v3' | 'deepseek-r1' | 'claude-3-5-sonnet' | 'gpt-4o';
+  setSelectedModel: (val: 'deepseek-v3' | 'deepseek-r1' | 'claude-3-5-sonnet' | 'gpt-4o') => void;
   isSidebarOpen: boolean;
   setIsSidebarOpen: (val: boolean) => void;
   handleSendMessage: (textToSend: string) => void;
+  userPlanId: string;
+  onTriggerSubscription: () => void;
 }
 
 export const ChatPane: React.FC<ChatPaneProps> = ({
@@ -21,7 +24,9 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   setSelectedModel,
   isSidebarOpen,
   setIsSidebarOpen,
-  handleSendMessage
+  handleSendMessage,
+  userPlanId,
+  onTriggerSubscription
 }) => {
   const [inputMessage, setInputMessage] = useState('');
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -45,6 +50,13 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     const text = customText || inputMessage;
     if (!text.trim()) return;
     
+    // Lock image generation if the user's active plan does not permit it
+    const isImageAllowed = hasPlanFeature(userPlanId, 'image_generation');
+    if (!isImageAllowed && (text.toLowerCase().includes('image') || text.startsWith('/image'))) {
+      onTriggerSubscription();
+      return;
+    }
+
     handleSendMessage(text);
     if (!customText) {
       setInputMessage('');
@@ -75,9 +87,10 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                 onChange={(e) => setSelectedModel(e.target.value as any)}
                 className="bg-slate-900 border border-white/10 hover:border-white/20 text-white rounded-xl text-xs font-semibold py-2 pl-3 pr-8 focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer appearance-none"
               >
-                <option value="gemini-2-flash">✨ Gemini 2.5 Flash (Default)</option>
-                <option value="gemini-2-pro">🧠 Gemini 2.5 Pro (Heavy reasoning)</option>
-                <option value="gemini-1-ultra">🔥 Gemini 1.5 Ultra (Legacy)</option>
+                <option value="deepseek-v3">🇨🇳 DeepSeek V3 (Default)</option>
+                <option value="deepseek-r1">🧠 DeepSeek R1 (Reasoning)</option>
+                <option value="claude-3-5-sonnet">🎭 Claude 3.5 Sonnet</option>
+                <option value="gpt-4o">🤖 GPT-4o</option>
               </select>
               <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-zinc-400">
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -142,7 +155,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
               </svg>
             </div>
-            <h2 className="text-2xl font-bold text-white mb-2">Welcome to Aegis Workspace</h2>
+            <h2 className="text-2xl font-bold text-white mb-2">Welcome to Chatty Workspace</h2>
             <p className="text-sm text-zinc-400 mb-8">
               Your sandbox environment is initialized. Select one of the enterprise presets below or type a query.
             </p>
@@ -177,7 +190,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                 <span className="w-2 h-2 rounded-full bg-indigo-400 pulse-dot"></span>
                 <span className="w-2 h-2 rounded-full bg-purple-400 pulse-dot"></span>
                 <span className="w-2 h-2 rounded-full bg-cyan-400 pulse-dot"></span>
-                <span className="text-xs text-zinc-500 ml-2 font-medium">Aegis AI is parsing...</span>
+                <span className="text-xs text-zinc-500 ml-2 font-medium">Chatty AI is parsing...</span>
               </div>
             </div>
           </div>
@@ -227,7 +240,14 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
               {/* AI Image Generation Button */}
               <button 
                 type="button" 
-                onClick={() => handleLocalSubmit("/image " + inputMessage)}
+                onClick={() => {
+                  const isImageAllowed = hasPlanFeature(userPlanId, 'image_generation');
+                  if (!isImageAllowed) {
+                    onTriggerSubscription();
+                  } else {
+                    handleLocalSubmit("/image " + inputMessage);
+                  }
+                }}
                 disabled={!inputMessage.trim() || isResponding}
                 className="p-2 text-zinc-500 hover:text-white rounded-xl hover:bg-white/5 transition-colors cursor-pointer disabled:opacity-30 disabled:pointer-events-none"
                 title="Generate AI Image"
@@ -259,7 +279,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 
           <div className="flex justify-between items-center px-2 text-[10px] text-zinc-500">
             <span>Secure Session • AES 256 Handshake</span>
-            <span>Gemini models may output mock info</span>
+            <span>OpenRouter models may output mock info</span>
           </div>
 
         </div>
