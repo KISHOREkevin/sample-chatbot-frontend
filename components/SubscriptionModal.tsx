@@ -195,9 +195,9 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({ isOpen, on
           </div>
         ) : (
           /* Cards Grid - Dynamically supports any number of plans */
-          <div className={`grid gap-6 overflow-x-auto pt-4 pb-2 px-1 scrollbar-none max-h-[60vh] md:max-h-none ${
+          <div className={`grid grid-cols-1 gap-6 overflow-y-auto pt-4 pb-2 px-1 scrollbar-none max-h-[60vh] md:max-h-none ${
             PLANS.length === 1 
-              ? 'justify-center max-w-md mx-auto grid-cols-1' 
+              ? 'justify-center max-w-md mx-auto' 
               : PLANS.length === 2 
                 ? 'md:grid-cols-2 max-w-3xl mx-auto' 
                 : 'md:grid-cols-3'

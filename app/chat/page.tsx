@@ -1,41 +1,113 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { MOCK_CHATS, MOCK_AI_RESPONSES, MOCK_DEFAULT_RESPONSE, ChatSession, Message } from '../sampleData';
+import { ChatSession, Message } from '@/types/chat';
 import { Sidebar } from '../../components/Sidebar';
 import { ChatPane } from '../../components/ChatPane';
 import { SubscriptionModal } from '../../components/SubscriptionModal';
 import { useAppDispatch, useAppSelector } from '@/redux/store';
 import { logoutUser } from '@/redux/slices/authSlice';
+import {
+  fetchConversations,
+  createConversation,
+  fetchConversationDetail,
+  renameConversation,
+  deleteConversation,
+  sendMessageStream,
+  editMessageStream
+} from '@/api/conversations';
 
 export default function ChatPage() {
   const router = useRouter();
   const dispatch = useAppDispatch();
   const { user, planId, isInitialized } = useAppSelector((state) => state.auth);
 
-  // Chat-related state (Hooks must be declared unconditionally at the top)
-  const [chats, setChats] = useState<ChatSession[]>(MOCK_CHATS);
-  const [activeChatId, setActiveChatId] = useState<string>('chat-1');
+  // Chat-related state
+  const [chats, setChats] = useState<ChatSession[]>([]);
+  const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [isResponding, setIsResponding] = useState(false);
   const [selectedModel, setSelectedModel] = useState<'deepseek-v3' | 'deepseek-r1' | 'claude-3-5-sonnet' | 'gpt-4o'>('deepseek-v3');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isSubscriptionModalOpen, setIsSubscriptionModalOpen] = useState(false);
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
 
-  // Render a loading state during hydration/initialization to prevent hydration mismatches
-  if (!isInitialized) {
-    return (
-      <div className="flex h-screen w-full items-center justify-center bg-[#080B11] text-zinc-400">
-        <div className="flex flex-col items-center gap-3">
-          <div className="h-10 w-10 animate-spin rounded-full border-4 border-indigo-500 border-t-transparent"></div>
-          <p className="text-sm font-medium tracking-wide">Syncing workspace...</p>
-        </div>
-      </div>
-    );
-  }
+  // Abort and typing refs for cancellation
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const activeAssistantMsgRef = useRef<Message | null>(null);
 
-  // Map Redux user details to layout display
+  const handleStopGeneration = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setIsResponding(false);
+  };
+
+  // Redirect to login if session is unauthenticated
+  useEffect(() => {
+    if (isInitialized && !user) {
+      router.push('/login');
+    }
+  }, [isInitialized, user, router]);
+
+  // Load user conversation list on initialization
+  useEffect(() => {
+    if (isInitialized && user) {
+      loadConversations();
+    }
+  }, [isInitialized, user]);
+
+  // Dynamically load conversation details when active chat selection changes
+  useEffect(() => {
+    if (activeChatId) {
+      fetchChatDetails(activeChatId);
+    }
+  }, [activeChatId]);
+
+  const loadConversations = async () => {
+    try {
+      const data = await fetchConversations();
+      const formattedChats = data.map(chat => ({
+        ...chat,
+        messages: chat.messages || []
+      }));
+      setChats(formattedChats);
+      if (formattedChats.length > 0) {
+        setActiveChatId(formattedChats[0].id);
+      } else {
+        const newChat = await createConversation();
+        setChats([{ ...newChat, messages: newChat.messages || [] }]);
+        setActiveChatId(newChat.id);
+      }
+    } catch (e) {
+      console.error("Failed to load conversations:", e);
+    }
+  };
+
+  const fetchChatDetails = async (id: string) => {
+    try {
+      const detail = await fetchConversationDetail(id);
+      setChats(prev => prev.map(chat => chat.id === id ? { ...detail, messages: detail.messages || [] } : chat));
+    } catch (e) {
+      console.error("Failed to fetch conversation details:", e);
+    }
+  };
+
+  const refreshConversationsList = async () => {
+    try {
+      const data = await fetchConversations();
+      setChats(prev => data.map(chat => {
+        const match = prev.find(p => p.id === chat.id);
+        return match 
+          ? { ...chat, messages: match.messages || [] } 
+          : { ...chat, messages: [] };
+      }));
+    } catch (e) {
+      console.error("Failed to refresh conversation list:", e);
+    }
+  };
+
   const currentUser = {
     name: user?.full_name || 'Anonymous User',
     email: user?.email || 'no-email@chat.com',
@@ -44,138 +116,319 @@ export default function ChatPage() {
     planId: planId
   };
 
-  // Handle Sending a Message (Simulated streaming responses)
-  const handleSendMessage = (text: string) => {
-    if (!text.trim() || isResponding) return;
+  const handleSendMessage = async (text: string) => {
+    if (!text.trim() || isResponding || !activeChatId) return;
 
-    // Create User Message
-    const userMsg: Message = {
-      id: `msg-user-${Date.now()}`,
+    const tempUserMsg: Message = {
+      id: `msg-user-temp-${Date.now()}`,
       sender: 'user',
       text: text,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
 
-    // Update messages lists
     setChats(prevChats => 
       prevChats.map(chat => {
         if (chat.id === activeChatId) {
           return {
             ...chat,
-            messages: [...chat.messages, userMsg]
+            messages: [...(chat.messages || []), tempUserMsg]
           };
         }
         return chat;
       })
     );
 
-    // Trigger simulated AI responder
     setIsResponding(true);
     
-    setTimeout(() => {
-      // Find matching keywords response
-      const matched = MOCK_AI_RESPONSES.find(resp => 
-        resp.keywords.some(keyword => text.toLowerCase().includes(keyword))
-      );
-      
-      let responseText = matched ? matched.text : MOCK_DEFAULT_RESPONSE;
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
-      // Inject custom prompt dynamically if user requested an image
-      if (text.toLowerCase().includes('image') || text.startsWith('/image')) {
-        const promptValue = text.replace(/^\/image\s*/i, '').trim() || 'A futuristic glassmorphic workspace layout with glowing networks';
-        responseText = `Here is your generated image based on the prompt: **"${promptValue}"**
-        
-![Futuristic Workspace](/futuristic_workspace.png)
+    let accumulatedText = "";
+    let assistantMsgId = "";
 
-This layout features neon blue and purple glowing grid systems, representing clean enterprise pathways. Feel free to refine the prompt for a new render!`;
-      }
-      
-      // Simulate streaming AI Response bubble
-      const assistantMsg: Message = {
-        id: `msg-assistant-${Date.now()}`,
-        sender: 'assistant',
-        text: '',
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      };
-
-      setChats(prevChats => 
-        prevChats.map(chat => {
-          if (chat.id === activeChatId) {
-            return {
-              ...chat,
-              messages: [...chat.messages, assistantMsg]
-            };
+    try {
+      await sendMessageStream(
+        activeChatId,
+        text,
+        {
+          onUserMessage: (dbUserMsg) => {
+            setChats(prevChats => 
+              prevChats.map(chat => {
+                if (chat.id === activeChatId) {
+                  const filtered = (chat.messages || []).filter(m => m.id !== tempUserMsg.id);
+                  return {
+                    ...chat,
+                    messages: [...filtered, dbUserMsg]
+                  };
+                }
+                return chat;
+              })
+            );
+          },
+          onAssistantStart: (dbAssistantMsg) => {
+            assistantMsgId = dbAssistantMsg.id;
+            activeAssistantMsgRef.current = dbAssistantMsg;
+            setChats(prevChats => 
+              prevChats.map(chat => {
+                if (chat.id === activeChatId) {
+                  return {
+                    ...chat,
+                    messages: [...(chat.messages || []), dbAssistantMsg]
+                  };
+                }
+                return chat;
+              })
+            );
+          },
+          onContent: (chunk) => {
+            accumulatedText += chunk;
+            setChats(prevChats => 
+              prevChats.map(chat => {
+                if (chat.id === activeChatId) {
+                  const nextMessages = [...(chat.messages || [])];
+                  const lastIdx = nextMessages.length - 1;
+                  if (nextMessages[lastIdx] && nextMessages[lastIdx].sender === 'assistant') {
+                    nextMessages[lastIdx] = {
+                      ...nextMessages[lastIdx],
+                      text: accumulatedText + ' ▌'
+                    };
+                  }
+                  return { ...chat, messages: nextMessages };
+                }
+                return chat;
+              })
+            );
+          },
+          onDone: (dbAssistantMsg) => {
+            activeAssistantMsgRef.current = dbAssistantMsg;
+            setChats(prevChats => 
+              prevChats.map(chat => {
+                if (chat.id === activeChatId) {
+                  const nextMessages = [...(chat.messages || [])];
+                  const lastIdx = nextMessages.length - 1;
+                  if (nextMessages[lastIdx] && nextMessages[lastIdx].sender === 'assistant') {
+                    nextMessages[lastIdx] = dbAssistantMsg;
+                  }
+                  return { ...chat, messages: nextMessages };
+                }
+                return chat;
+              })
+            );
+            refreshConversationsList();
           }
-          return chat;
-        })
+        },
+        controller.signal
       );
-      
+    } catch (e: any) {
+      if (e.name === 'AbortError' || e.name === 'CanceledError' || e.code === 'ERR_CANCELED') {
+        console.log("Send message canceled");
+        setChats(prevChats => 
+          prevChats.map(chat => {
+            if (chat.id === activeChatId) {
+              const nextMessages = [...(chat.messages || [])];
+              const lastIdx = nextMessages.length - 1;
+              if (nextMessages[lastIdx] && nextMessages[lastIdx].sender === 'assistant') {
+                nextMessages[lastIdx] = {
+                  ...nextMessages[lastIdx],
+                  text: accumulatedText
+                };
+              }
+              return { ...chat, messages: nextMessages };
+            }
+            return chat;
+          })
+        );
+      } else {
+        console.error("Failed to send message stream:", e);
+        setChats(prevChats => 
+          prevChats.map(chat => {
+            if (chat.id === activeChatId) {
+              const hasAssistant = (chat.messages || []).some(m => m.sender === 'assistant' && m.id === assistantMsgId);
+              if (!hasAssistant) {
+                return {
+                  ...chat,
+                  messages: (chat.messages || []).filter(m => m.id !== tempUserMsg.id)
+                };
+              }
+            }
+            return chat;
+          })
+        );
+      }
+      refreshConversationsList();
+    } finally {
       setIsResponding(false);
-
-      // Render streaming characters
-      let currentLength = 0;
-      const interval = setInterval(() => {
-        currentLength += 8;
-        if (currentLength >= responseText.length) {
-          clearInterval(interval);
-          setChats(prevChats => 
-            prevChats.map(chat => {
-              if (chat.id === activeChatId) {
-                const nextMessages = [...chat.messages];
-                const lastIdx = nextMessages.length - 1;
-                if (nextMessages[lastIdx] && nextMessages[lastIdx].sender === 'assistant') {
-                  nextMessages[lastIdx] = {
-                    ...nextMessages[lastIdx],
-                    text: responseText
-                  };
-                }
-                return { ...chat, messages: nextMessages };
-              }
-              return chat;
-            })
-          );
-        } else {
-          setChats(prevChats => 
-            prevChats.map(chat => {
-              if (chat.id === activeChatId) {
-                const nextMessages = [...chat.messages];
-                const lastIdx = nextMessages.length - 1;
-                if (nextMessages[lastIdx] && nextMessages[lastIdx].sender === 'assistant') {
-                  nextMessages[lastIdx] = {
-                    ...nextMessages[lastIdx],
-                    text: responseText.slice(0, currentLength) + ' ▌'
-                  };
-                }
-                return { ...chat, messages: nextMessages };
-              }
-              return chat;
-            })
-          );
-        }
-      }, 30);
-
-    }, 1200);
+      abortControllerRef.current = null;
+    }
   };
 
-  // Start a new chat session
-  const handleNewChat = () => {
-    const newId = `chat-new-${Date.now()}`;
-    const newSession: ChatSession = {
-      id: newId,
-      title: '✨ New AI Conversation',
-      category: 'Recent',
-      messages: [
-        {
-          id: `msg-welcome-${Date.now()}`,
-          sender: 'assistant',
-          text: `Welcome! I'm your AI Assistant, configured using secure Email/Google authentication. Ask me anything about engineering, design systems, or data structures.`,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  const handleEditMessage = async (messageId: string, text: string) => {
+    if (!text.trim() || isResponding || !activeChatId) return;
+
+    // Instantly truncate downstream messages in the client UI for a fast, responsive feel
+    setChats(prevChats => 
+      prevChats.map(chat => {
+        if (chat.id === activeChatId) {
+          const messages = chat.messages || [];
+          const idx = messages.findIndex(m => m.id === messageId);
+          if (idx !== -1) {
+            const updatedMsg = { ...messages[idx], text };
+            return {
+              ...chat,
+              messages: [...messages.slice(0, idx), updatedMsg]
+            };
+          }
         }
-      ]
-    };
-    setChats([newSession, ...chats]);
-    setActiveChatId(newId);
-    setIsSidebarOpen(false);
+        return chat;
+      })
+    );
+
+    setIsResponding(true);
+    
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    let accumulatedText = "";
+
+    try {
+      await editMessageStream(
+        activeChatId,
+        messageId,
+        text,
+        {
+          onHistory: (historyMessages) => {
+            setChats(prevChats => 
+              prevChats.map(chat => {
+                if (chat.id === activeChatId) {
+                  return {
+                    ...chat,
+                    messages: historyMessages
+                  };
+                }
+                return chat;
+              })
+            );
+          },
+          onAssistantStart: (dbAssistantMsg) => {
+            activeAssistantMsgRef.current = dbAssistantMsg;
+            setChats(prevChats => 
+              prevChats.map(chat => {
+                if (chat.id === activeChatId) {
+                  return {
+                    ...chat,
+                    messages: [...(chat.messages || []), dbAssistantMsg]
+                  };
+                }
+                return chat;
+              })
+            );
+          },
+          onContent: (chunk) => {
+            accumulatedText += chunk;
+            setChats(prevChats => 
+              prevChats.map(chat => {
+                if (chat.id === activeChatId) {
+                  const nextMessages = [...(chat.messages || [])];
+                  const lastIdx = nextMessages.length - 1;
+                  if (nextMessages[lastIdx] && nextMessages[lastIdx].sender === 'assistant') {
+                    nextMessages[lastIdx] = {
+                      ...nextMessages[lastIdx],
+                      text: accumulatedText + ' ▌'
+                    };
+                  }
+                  return { ...chat, messages: nextMessages };
+                }
+                return chat;
+              })
+            );
+          },
+          onDone: (dbAssistantMsg) => {
+            activeAssistantMsgRef.current = dbAssistantMsg;
+            setChats(prevChats => 
+              prevChats.map(chat => {
+                if (chat.id === activeChatId) {
+                  const nextMessages = [...(chat.messages || [])];
+                  const lastIdx = nextMessages.length - 1;
+                  if (nextMessages[lastIdx] && nextMessages[lastIdx].sender === 'assistant') {
+                    nextMessages[lastIdx] = dbAssistantMsg;
+                  }
+                  return { ...chat, messages: nextMessages };
+                }
+                return chat;
+              })
+            );
+            refreshConversationsList();
+          }
+        },
+        controller.signal
+      );
+    } catch (e: any) {
+      if (e.name === 'AbortError' || e.name === 'CanceledError' || e.code === 'ERR_CANCELED') {
+        console.log("Edit message canceled");
+        setChats(prevChats => 
+          prevChats.map(chat => {
+            if (chat.id === activeChatId) {
+              const nextMessages = [...(chat.messages || [])];
+              const lastIdx = nextMessages.length - 1;
+              if (nextMessages[lastIdx] && nextMessages[lastIdx].sender === 'assistant') {
+                nextMessages[lastIdx] = {
+                  ...nextMessages[lastIdx],
+                  text: accumulatedText
+                };
+              }
+              return { ...chat, messages: nextMessages };
+            }
+            return chat;
+          })
+        );
+      } else {
+        console.error("Failed to edit message stream:", e);
+      }
+      refreshConversationsList();
+    } finally {
+      setIsResponding(false);
+      abortControllerRef.current = null;
+    }
+  };
+
+  const handleNewChat = async () => {
+    try {
+      const newSession = await createConversation();
+      setChats(prev => [newSession, ...prev]);
+      setActiveChatId(newSession.id);
+      setIsSidebarOpen(false);
+    } catch (e) {
+      console.error("Failed to start new conversation:", e);
+    }
+  };
+
+  const handleDeleteChat = async (id: string) => {
+    try {
+      await deleteConversation(id);
+      const updatedChats = chats.filter(chat => chat.id !== id);
+      if (updatedChats.length === 0) {
+        const newSession = await createConversation();
+        setChats([newSession]);
+        setActiveChatId(newSession.id);
+      } else {
+        setChats(updatedChats);
+        if (activeChatId === id) {
+          setActiveChatId(updatedChats[0].id);
+        }
+      }
+    } catch (e) {
+      console.error("Failed to delete conversation:", e);
+    }
+  };
+
+  const handleRenameChat = async (id: string, newTitle: string) => {
+    if (!newTitle.trim()) return;
+    try {
+      await renameConversation(id, newTitle);
+      setChats(prev => prev.map(chat => chat.id === id ? { ...chat, title: newTitle } : chat));
+    } catch (e) {
+      console.error("Failed to rename conversation:", e);
+    }
   };
 
   const handleLogout = () => {
@@ -188,16 +441,33 @@ This layout features neon blue and purple glowing grid systems, representing cle
     router.push('/login');
   };
 
-  const activeChat = chats.find(c => c.id === activeChatId) || chats[0];
+  const activeChat = chats.find(c => c.id === activeChatId) || chats[0] || {
+    id: '',
+    title: '✨ New AI Conversation',
+    category: 'Recent',
+    messages: []
+  };
+
+  const handleSetActiveChatId = (id: string) => {
+    setActiveChatId(id);
+  };
+
+  if (!isInitialized) {
+    return (
+      <div className="flex h-screen w-full items-center justify-center bg-[#080B11] text-zinc-400">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-10 w-10 animate-spin rounded-full border-4 border-indigo-500 border-t-transparent"></div>
+          <p className="text-sm font-medium tracking-wide">Syncing workspace...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen w-full bg-[#080B11] text-zinc-100 overflow-hidden font-sans">
-      
-      {/* Glow Ambient Circles */}
       <div className="absolute top-0 right-0 w-[600px] h-[600px] rounded-full bg-indigo-900/10 blur-[120px] pointer-events-none"></div>
-      <div className="absolute bottom-0 left-80 w-[600px] h-[600px] rounded-full bg-cyan-900/10 blur-[120px] pointer-events-none"></div>
+      <div className="absolute bottom-0 left-72 w-[600px] h-[600px] rounded-full bg-cyan-900/10 blur-[120px] pointer-events-none"></div>
 
-      {/* MOBILE DRAWER BACKDROP */}
       {isSidebarOpen && (
         <div 
           onClick={() => setIsSidebarOpen(false)}
@@ -205,20 +475,20 @@ This layout features neon blue and purple glowing grid systems, representing cle
         />
       )}
 
-      {/* SIDEBAR PANEL */}
       <Sidebar
         user={currentUser}
-        activeChatId={activeChatId}
-        setActiveChatId={setActiveChatId}
+        activeChatId={activeChatId || ''}
+        setActiveChatId={handleSetActiveChatId}
         chats={chats}
         isSidebarOpen={isSidebarOpen}
         setIsSidebarOpen={setIsSidebarOpen}
         handleNewChat={handleNewChat}
         handleLogout={handleLogout}
+        handleDeleteChat={handleDeleteChat}
+        handleRenameChat={handleRenameChat}
         onOpenSubscription={() => setIsSubscriptionModalOpen(true)}
       />
 
-      {/* MAIN SCREEN CHAT SPACE */}
       <ChatPane
         activeChat={activeChat}
         isResponding={isResponding}
@@ -227,17 +497,17 @@ This layout features neon blue and purple glowing grid systems, representing cle
         isSidebarOpen={isSidebarOpen}
         setIsSidebarOpen={setIsSidebarOpen}
         handleSendMessage={handleSendMessage}
+        handleEditMessage={handleEditMessage}
+        handleStopGeneration={handleStopGeneration}
         userPlanId={planId}
         onTriggerSubscription={() => setIsSubscriptionModalOpen(true)}
       />
 
-      {/* SUBSCRIPTION CONSOLE MODAL */}
       <SubscriptionModal
         isOpen={isSubscriptionModalOpen}
         onClose={() => setIsSubscriptionModalOpen(false)}
       />
 
-      {/* LOGOUT CONFIRMATION MODAL */}
       {isLogoutModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div 
