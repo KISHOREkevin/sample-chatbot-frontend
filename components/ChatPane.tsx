@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { ChatSession } from '@/types/chat';
-import { parseMarkdown } from './MarkdownRenderer';
+import MarkdownRenderer from './MarkdownRenderer';
 import { hasPlanFeature } from './SubscriptionModal';
 
 interface ChatPaneProps {
@@ -40,7 +40,13 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
-
+  const StreamingMessage = ({ text }: { text: string }) => {
+    return (
+      <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-relaxed">
+        {text}
+      </pre>
+    );
+  };
   const handleStartEdit = (id: string, text: string) => {
     setEditingId(id);
     setEditText(text);
@@ -75,8 +81,11 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 
   // Auto-scroll effect local to the chat workspace
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [activeChat?.messages?.length, isResponding]);
+    chatEndRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "end",
+    });
+  }, [activeChat.messages]);
 
   // Auto-resize textarea logic based on content
   useEffect(() => {
@@ -194,11 +203,10 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                     </button>
                     <button
                       onClick={() => handleCopyText(msg.id, msg.text)}
-                      className={`p-1.5 rounded-lg transition-colors cursor-pointer flex items-center justify-center max-lg:p-1 ${
-                        copiedId === msg.id 
-                          ? 'bg-emerald-500/20 text-emerald-400' 
-                          : 'text-zinc-400 hover:text-white hover:bg-white/5 max-lg:text-white/70 max-lg:hover:bg-white/10'
-                      }`}
+                      className={`p-1.5 rounded-lg transition-colors cursor-pointer flex items-center justify-center max-lg:p-1 ${copiedId === msg.id
+                        ? 'bg-emerald-500/20 text-emerald-400'
+                        : 'text-zinc-400 hover:text-white hover:bg-white/5 max-lg:text-white/70 max-lg:hover:bg-white/10'
+                        }`}
                       title="Copy Prompt"
                     >
                       {copiedId === msg.id ? (
@@ -219,11 +227,10 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                   <div className="absolute left-full ml-3.5 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 bg-slate-950/95 border border-white/10 backdrop-blur-md rounded-xl p-1 flex items-center gap-1 shadow-2xl select-none z-20 max-lg:opacity-100 max-lg:relative max-lg:top-auto max-lg:left-auto max-lg:translate-y-0 max-lg:ml-0 max-lg:mt-2 max-lg:bg-transparent max-lg:border-0 max-lg:shadow-none max-lg:p-0 max-lg:justify-start">
                     <button
                       onClick={() => handleCopyText(msg.id, msg.text)}
-                      className={`p-1.5 rounded-lg transition-colors cursor-pointer flex items-center justify-center max-lg:p-1 ${
-                        copiedId === msg.id 
-                          ? 'bg-emerald-500/20 text-emerald-400' 
-                          : 'text-zinc-400 hover:text-white hover:bg-white/5 max-lg:text-zinc-400 max-lg:hover:bg-white/5'
-                      }`}
+                      className={`p-1.5 rounded-lg transition-colors cursor-pointer flex items-center justify-center max-lg:p-1 ${copiedId === msg.id
+                        ? 'bg-emerald-500/20 text-emerald-400'
+                        : 'text-zinc-400 hover:text-white hover:bg-white/5 max-lg:text-zinc-400 max-lg:hover:bg-white/5'
+                        }`}
                       title="Copy Response"
                     >
                       {copiedId === msg.id ? (
@@ -263,7 +270,29 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                   </div>
                 ) : (
                   <div className="chat-markdown font-sans leading-relaxed">
-                    {msg.sender === 'assistant' ? parseMarkdown(msg.text) : <p className="whitespace-pre-wrap">{msg.text}</p>}
+                    {msg.sender === "assistant" ? (
+                      <>
+                        {msg.isLoading && !msg.text && (
+                          <div className="flex items-center gap-2 py-2">
+                            <span className="w-2 h-2 rounded-full bg-indigo-400 pulse-dot"></span>
+                            <span className="w-2 h-2 rounded-full bg-purple-400 pulse-dot"></span>
+                            <span className="w-2 h-2 rounded-full bg-cyan-400 pulse-dot"></span>
+
+                            <span className="text-xs text-zinc-500">
+                              Chatty AI is thinking...
+                            </span>
+                          </div>
+                        )}
+
+                        {msg.text && (
+                          msg.isLoading
+                            ? <StreamingMessage text={msg.text} />
+                            : <MarkdownRenderer content={msg.text} />
+                        )}
+                      </>
+                    ) : (
+                      <p className="whitespace-pre-wrap">{msg.text}</p>
+                    )}
                   </div>
                 )}
 
@@ -303,26 +332,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           </div>
         )}
 
-        {/* Typing Indicator */}
-        {isResponding && (
-          <div className="flex gap-4 max-w-5xl mx-auto justify-start">
-            <div className="h-9 w-9 rounded-xl bg-gradient-to-tr from-indigo-500 to-cyan-400 p-[1px] flex-shrink-0 max-sm:hidden">
-              <div className="h-full w-full bg-slate-950 rounded-xl flex items-center justify-center">
-                <svg className="w-4 h-4 text-cyan-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                </svg>
-              </div>
-            </div>
-            <div className="max-w-[85%] rounded-2xl rounded-tl-none p-4 bg-slate-900/60 border border-white/5 text-zinc-100 shadow-md backdrop-blur-sm">
-              <div className="flex items-center gap-1.5 py-1 px-2">
-                <span className="w-2 h-2 rounded-full bg-indigo-400 pulse-dot"></span>
-                <span className="w-2 h-2 rounded-full bg-purple-400 pulse-dot"></span>
-                <span className="w-2 h-2 rounded-full bg-cyan-400 pulse-dot"></span>
-                <span className="text-xs text-zinc-500 ml-2 font-medium">Chatty AI is parsing...</span>
-              </div>
-            </div>
-          </div>
-        )}
+
 
         <div ref={chatEndRef} />
       </section>

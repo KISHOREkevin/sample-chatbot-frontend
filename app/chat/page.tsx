@@ -99,8 +99,8 @@ export default function ChatPage() {
       const data = await fetchConversations();
       setChats(prev => data.map(chat => {
         const match = prev.find(p => p.id === chat.id);
-        return match 
-          ? { ...chat, messages: match.messages || [] } 
+        return match
+          ? { ...chat, messages: match.messages || [] }
           : { ...chat, messages: [] };
       }));
     } catch (e) {
@@ -126,20 +126,33 @@ export default function ChatPage() {
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
 
-    setChats(prevChats => 
+
+
+    setIsResponding(true);
+
+    const tempAssistantMsg: Message = {
+      id: `msg-ai-temp-${Date.now()}`,
+      sender: "assistant",
+      text: "",
+      timestamp: "",
+      isLoading: true,
+    };;
+
+    setChats(prevChats =>
       prevChats.map(chat => {
-        if (chat.id === activeChatId) {
-          return {
-            ...chat,
-            messages: [...(chat.messages || []), tempUserMsg]
-          };
-        }
-        return chat;
+        if (chat.id !== activeChatId) return chat;
+
+        return {
+          ...chat,
+          messages: [
+            ...(chat.messages || []),
+            tempUserMsg,
+            tempAssistantMsg,
+          ],
+        };
       })
     );
 
-    setIsResponding(true);
-    
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
@@ -152,64 +165,81 @@ export default function ChatPage() {
         text,
         {
           onUserMessage: (dbUserMsg) => {
-            setChats(prevChats => 
+            setChats(prevChats =>
               prevChats.map(chat => {
-                if (chat.id === activeChatId) {
-                  const filtered = (chat.messages || []).filter(m => m.id !== tempUserMsg.id);
-                  return {
-                    ...chat,
-                    messages: [...filtered, dbUserMsg]
-                  };
-                }
-                return chat;
+                if (chat.id !== activeChatId) return chat;
+
+                return {
+                  ...chat,
+                  messages: chat.messages.map(msg =>
+                    msg.id === tempUserMsg.id
+                      ? dbUserMsg
+                      : msg
+                  )
+                };
               })
             );
           },
           onAssistantStart: (dbAssistantMsg) => {
             assistantMsgId = dbAssistantMsg.id;
-            activeAssistantMsgRef.current = dbAssistantMsg;
-            setChats(prevChats => 
+
+            setChats(prevChats =>
               prevChats.map(chat => {
-                if (chat.id === activeChatId) {
-                  return {
-                    ...chat,
-                    messages: [...(chat.messages || []), dbAssistantMsg]
-                  };
-                }
-                return chat;
+                if (chat.id !== activeChatId) return chat;
+
+                return {
+                  ...chat,
+                  messages: chat.messages.map(msg =>
+                    msg.id === tempAssistantMsg.id
+                      ? {
+                        ...dbAssistantMsg,
+                        isLoading: true,
+                      }
+                      : msg
+                  )
+                };
               })
             );
           },
           onContent: (chunk) => {
             accumulatedText += chunk;
-            setChats(prevChats => 
+            setChats(prevChats =>
               prevChats.map(chat => {
                 if (chat.id === activeChatId) {
-                  const nextMessages = [...(chat.messages || [])];
-                  const lastIdx = nextMessages.length - 1;
-                  if (nextMessages[lastIdx] && nextMessages[lastIdx].sender === 'assistant') {
-                    nextMessages[lastIdx] = {
-                      ...nextMessages[lastIdx],
-                      text: accumulatedText + ' ▌'
-                    };
-                  }
-                  return { ...chat, messages: nextMessages };
+                  return {
+                    ...chat,
+                    messages: chat.messages.map(msg =>
+                      msg.id === assistantMsgId
+                        ? {
+                          ...msg,
+                          text: accumulatedText + " ▌",
+                          isLoading: true,
+                        }
+                        : msg
+                    )
+                  };
                 }
+
                 return chat;
               })
             );
           },
           onDone: (dbAssistantMsg) => {
             activeAssistantMsgRef.current = dbAssistantMsg;
-            setChats(prevChats => 
+            setChats(prevChats =>
               prevChats.map(chat => {
                 if (chat.id === activeChatId) {
-                  const nextMessages = [...(chat.messages || [])];
-                  const lastIdx = nextMessages.length - 1;
-                  if (nextMessages[lastIdx] && nextMessages[lastIdx].sender === 'assistant') {
-                    nextMessages[lastIdx] = dbAssistantMsg;
-                  }
-                  return { ...chat, messages: nextMessages };
+                  return {
+                    ...chat,
+                    messages: chat.messages.map(msg =>
+                      msg.id === assistantMsgId
+                        ? {
+                          ...dbAssistantMsg,
+                          isLoading: false,
+                        }
+                        : msg
+                    )
+                  };
                 }
                 return chat;
               })
@@ -222,7 +252,7 @@ export default function ChatPage() {
     } catch (e: any) {
       if (e.name === 'AbortError' || e.name === 'CanceledError' || e.code === 'ERR_CANCELED') {
         console.log("Send message canceled");
-        setChats(prevChats => 
+        setChats(prevChats =>
           prevChats.map(chat => {
             if (chat.id === activeChatId) {
               const nextMessages = [...(chat.messages || [])];
@@ -240,7 +270,7 @@ export default function ChatPage() {
         );
       } else {
         console.error("Failed to send message stream:", e);
-        setChats(prevChats => 
+        setChats(prevChats =>
           prevChats.map(chat => {
             if (chat.id === activeChatId) {
               const hasAssistant = (chat.messages || []).some(m => m.sender === 'assistant' && m.id === assistantMsgId);
@@ -266,28 +296,45 @@ export default function ChatPage() {
     if (!text.trim() || isResponding || !activeChatId) return;
 
     // Instantly truncate downstream messages in the client UI for a fast, responsive feel
-    setChats(prevChats => 
+    const tempAssistantMsg: Message = {
+      id: `temp-edit-ai-${Date.now()}`,
+      sender: "assistant",
+      text: "",
+      timestamp: "",
+      isLoading: true,
+    };
+
+    setChats(prevChats =>
       prevChats.map(chat => {
-        if (chat.id === activeChatId) {
-          const messages = chat.messages || [];
-          const idx = messages.findIndex(m => m.id === messageId);
-          if (idx !== -1) {
-            const updatedMsg = { ...messages[idx], text };
-            return {
-              ...chat,
-              messages: [...messages.slice(0, idx), updatedMsg]
-            };
-          }
-        }
-        return chat;
+        if (chat.id !== activeChatId) return chat;
+
+        const messages = chat.messages || [];
+        const idx = messages.findIndex(m => m.id === messageId);
+
+        if (idx === -1) return chat;
+
+        const updatedUser = {
+          ...messages[idx],
+          text,
+        };
+
+        return {
+          ...chat,
+          messages: [
+            ...messages.slice(0, idx),
+            updatedUser,
+            tempAssistantMsg,
+          ],
+        };
       })
     );
 
     setIsResponding(true);
-    
+
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
+    let assistantMsgId = "";
     let accumulatedText = "";
 
     try {
@@ -297,75 +344,107 @@ export default function ChatPage() {
         text,
         {
           onHistory: (historyMessages) => {
-            setChats(prevChats => 
+            console.log("History:", historyMessages);
+
+            setChats(prevChats =>
               prevChats.map(chat => {
-                if (chat.id === activeChatId) {
-                  return {
-                    ...chat,
-                    messages: historyMessages
-                  };
-                }
-                return chat;
+                if (chat.id !== activeChatId) return chat;
+
+                return {
+                  ...chat,
+                  messages: historyMessages.map(m => ({
+                    ...m,
+                    isLoading: false,
+                  })),
+                };
               })
             );
           },
           onAssistantStart: (dbAssistantMsg) => {
+            console.log("Assistant Start:", dbAssistantMsg);
+
+            assistantMsgId = dbAssistantMsg.id;
             activeAssistantMsgRef.current = dbAssistantMsg;
-            setChats(prevChats => 
+
+            setChats(prevChats =>
               prevChats.map(chat => {
-                if (chat.id === activeChatId) {
-                  return {
-                    ...chat,
-                    messages: [...(chat.messages || []), dbAssistantMsg]
-                  };
-                }
-                return chat;
+                if (chat.id !== activeChatId) return chat;
+
+                return {
+                  ...chat,
+                  messages: [
+                    ...chat.messages,
+                    {
+                      ...dbAssistantMsg,
+                      isLoading: true,
+                    },
+                  ],
+                };
               })
             );
           },
           onContent: (chunk) => {
             accumulatedText += chunk;
-            setChats(prevChats => 
+
+            setChats(prevChats =>
               prevChats.map(chat => {
-                if (chat.id === activeChatId) {
-                  const nextMessages = [...(chat.messages || [])];
-                  const lastIdx = nextMessages.length - 1;
-                  if (nextMessages[lastIdx] && nextMessages[lastIdx].sender === 'assistant') {
-                    nextMessages[lastIdx] = {
-                      ...nextMessages[lastIdx],
-                      text: accumulatedText + ' ▌'
-                    };
-                  }
-                  return { ...chat, messages: nextMessages };
-                }
-                return chat;
+                if (chat.id !== activeChatId) return chat;
+
+                const messages = [...chat.messages];
+
+                const index = messages.findIndex(
+                  m => m.id === assistantMsgId
+                );
+
+                if (index === -1) return chat;
+
+                messages[index] = {
+                  ...messages[index],
+                  text: accumulatedText + " ▌",
+                  isLoading: true,
+                };
+
+                return {
+                  ...chat,
+                  messages,
+                };
               })
             );
           },
           onDone: (dbAssistantMsg) => {
-            activeAssistantMsgRef.current = dbAssistantMsg;
-            setChats(prevChats => 
+            setChats(prevChats =>
               prevChats.map(chat => {
-                if (chat.id === activeChatId) {
-                  const nextMessages = [...(chat.messages || [])];
-                  const lastIdx = nextMessages.length - 1;
-                  if (nextMessages[lastIdx] && nextMessages[lastIdx].sender === 'assistant') {
-                    nextMessages[lastIdx] = dbAssistantMsg;
-                  }
-                  return { ...chat, messages: nextMessages };
-                }
-                return chat;
+                if (chat.id !== activeChatId) return chat;
+
+                const messages = [...chat.messages];
+
+                const index = messages.findIndex(
+                  m => m.id === assistantMsgId
+                );
+
+                if (index === -1) return chat;
+
+                messages[index] = {
+                  ...dbAssistantMsg,
+                  isLoading: false,
+                };
+
+                return {
+                  ...chat,
+                  messages,
+                };
               })
             );
+
             refreshConversationsList();
-          }
+          },
         },
         controller.signal
       );
     } catch (e: any) {
       if (e.name === 'AbortError' || e.name === 'CanceledError' || e.code === 'ERR_CANCELED') {
         console.log("Edit message canceled");
-        setChats(prevChats => 
+        setChats(prevChats =>
           prevChats.map(chat => {
             if (chat.id === activeChatId) {
               const nextMessages = [...(chat.messages || [])];
@@ -469,7 +548,7 @@ export default function ChatPage() {
       <div className="absolute bottom-0 left-72 w-[600px] h-[600px] rounded-full bg-cyan-900/10 blur-[120px] pointer-events-none"></div>
 
       {isSidebarOpen && (
-        <div 
+        <div
           onClick={() => setIsSidebarOpen(false)}
           className="fixed inset-0 z-30 bg-black/60 backdrop-blur-sm lg:hidden transition-opacity duration-300"
         />
@@ -510,7 +589,7 @@ export default function ChatPage() {
 
       {isLogoutModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div 
+          <div
             onClick={() => setIsLogoutModalOpen(false)}
             className="absolute inset-0 bg-black/60 backdrop-blur-md transition-opacity duration-300 animate-fadeIn"
           />

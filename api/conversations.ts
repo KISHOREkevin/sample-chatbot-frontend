@@ -13,6 +13,8 @@ export async function createConversation(title?: string): Promise<ChatSession> {
 }
 
 export async function fetchConversationDetail(id: string): Promise<ChatSession> {
+  console.log(id);
+
   const response = await api.get<ChatSession>(`/conversations/${id}`);
   return response.data;
 }
