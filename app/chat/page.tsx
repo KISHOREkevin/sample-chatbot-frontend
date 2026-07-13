@@ -25,8 +25,10 @@ export default function ChatPage() {
 
   // Chat-related state
   const [chats, setChats] = useState<ChatSession[]>([]);
+  const [isChatsLoading, setIsChatsLoading] = useState(true);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [isResponding, setIsResponding] = useState(false);
+  const [isMessagesLoading, setIsMessagesLoading] = useState(false);
   const [selectedModel, setSelectedModel] = useState<'deepseek-v3' | 'deepseek-r1' | 'claude-3-5-sonnet' | 'gpt-4o'>('deepseek-v3');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isSubscriptionModalOpen, setIsSubscriptionModalOpen] = useState(false);
@@ -35,12 +37,27 @@ export default function ChatPage() {
   // Abort and typing refs for cancellation
   const abortControllerRef = useRef<AbortController | null>(null);
   const activeAssistantMsgRef = useRef<Message | null>(null);
-
   const handleStopGeneration = () => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
     }
+
+    setChats(prevChats =>
+      prevChats.map(chat => {
+        if (chat.id !== activeChatId) return chat;
+
+        return {
+          ...chat,
+          messages: chat.messages.filter(msg => {
+            if (msg.sender !== "assistant") return true;
+
+            return msg.text.trim() !== "";
+          }),
+        };
+      })
+    );
+
     setIsResponding(false);
   };
 
@@ -66,6 +83,7 @@ export default function ChatPage() {
   }, [activeChatId]);
 
   const loadConversations = async () => {
+    setIsChatsLoading(true);
     try {
       const data = await fetchConversations();
       const formattedChats = data.map(chat => ({
@@ -82,15 +100,31 @@ export default function ChatPage() {
       }
     } catch (e) {
       console.error("Failed to load conversations:", e);
+    } finally {
+      setIsChatsLoading(false);
     }
   };
 
   const fetchChatDetails = async (id: string) => {
+    setIsMessagesLoading(true);
+
     try {
       const detail = await fetchConversationDetail(id);
-      setChats(prev => prev.map(chat => chat.id === id ? { ...detail, messages: detail.messages || [] } : chat));
+
+      setChats(prev =>
+        prev.map(chat =>
+          chat.id === id
+            ? {
+              ...detail,
+              messages: detail.messages || []
+            }
+            : chat
+        )
+      );
     } catch (e) {
-      console.error("Failed to fetch conversation details:", e);
+      console.error(e);
+    } finally {
+      setIsMessagesLoading(false);
     }
   };
 
@@ -252,20 +286,30 @@ export default function ChatPage() {
     } catch (e: any) {
       if (e.name === 'AbortError' || e.name === 'CanceledError' || e.code === 'ERR_CANCELED') {
         console.log("Send message canceled");
+
         setChats(prevChats =>
           prevChats.map(chat => {
-            if (chat.id === activeChatId) {
-              const nextMessages = [...(chat.messages || [])];
-              const lastIdx = nextMessages.length - 1;
-              if (nextMessages[lastIdx] && nextMessages[lastIdx].sender === 'assistant') {
+            if (chat.id !== activeChatId) return chat;
+
+            const nextMessages = [...chat.messages];
+            const lastIdx = nextMessages.length - 1;
+
+            if (lastIdx >= 0 && nextMessages[lastIdx].sender === "assistant") {
+              if (accumulatedText.trim()) {
                 nextMessages[lastIdx] = {
                   ...nextMessages[lastIdx],
-                  text: accumulatedText
+                  text: accumulatedText,
+                  isLoading: false,
                 };
+              } else {
+                nextMessages.pop();
               }
-              return { ...chat, messages: nextMessages };
             }
-            return chat;
+
+            return {
+              ...chat,
+              messages: nextMessages,
+            };
           })
         );
       } else {
@@ -559,6 +603,7 @@ export default function ChatPage() {
         activeChatId={activeChatId || ''}
         setActiveChatId={handleSetActiveChatId}
         chats={chats}
+        isChatsLoading={isChatsLoading}
         isSidebarOpen={isSidebarOpen}
         setIsSidebarOpen={setIsSidebarOpen}
         handleNewChat={handleNewChat}
@@ -578,6 +623,7 @@ export default function ChatPage() {
         handleSendMessage={handleSendMessage}
         handleEditMessage={handleEditMessage}
         handleStopGeneration={handleStopGeneration}
+        isMessagesLoading={isMessagesLoading}
         userPlanId={planId}
         onTriggerSubscription={() => setIsSubscriptionModalOpen(true)}
       />
