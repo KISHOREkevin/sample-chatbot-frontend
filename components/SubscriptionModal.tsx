@@ -1,82 +1,33 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAppDispatch, useAppSelector } from '@/redux/store';
 import { changeSubscriptionPlan } from '@/redux/slices/authSlice';
 import { X, Check, Zap, Sparkles, Loader2, ShieldCheck } from 'lucide-react';
+import { createRazorpayOrder, verifyRazorpayPayment, cancelSubscription, fetchPlans, Plan } from '@/api/billing';
 
-export interface PlanFeature {
-  text: string;
-  included: boolean;
-  highlight?: boolean;
-}
-
-export interface Plan {
-  id: string;
-  name: string;
-  price: string;
-  description: string;
-  features: PlanFeature[];
-  unlockedFeatures: string[];
-  badge?: string;
-  isRecommended?: boolean;
-  colorTheme?: {
-    borderActive: string;
-    borderHover: string;
-    badgeBg: string;
-    badgeText: string;
-    glowBg: string;
-  };
-}
-
-export const PLANS: Plan[] = [
-  {
-    id: 'free',
-    name: 'Chatty Free',
-    price: '$0',
-    description: 'Core chat capabilities for daily queries.',
-    unlockedFeatures: ['chat'],
-    features: [
-      { text: 'Unlimited text conversations', included: true },
-      { text: 'Access to OpenRouter models', included: true },
-      { text: 'Standard model latency boundaries', included: true },
-      { text: 'Premium Image Generation', included: false }
-    ],
-    colorTheme: {
-      borderActive: 'border-indigo-500/30 shadow-indigo-500/5',
-      borderHover: 'hover:border-indigo-500/20',
-      badgeBg: 'bg-indigo-600',
-      badgeText: 'text-white',
-      glowBg: 'from-indigo-500/5 to-transparent'
+const loadRazorpayScript = (): Promise<boolean> => {
+  return new Promise((resolve) => {
+    if (typeof window !== "undefined" && (window as any).Razorpay) {
+      resolve(true);
+      return;
     }
-  },
-  {
-    id: 'pro',
-    name: 'Chatty Pro',
-    price: '$9.99',
-    description: 'Complete bundle with AI Image Creator.',
-    unlockedFeatures: ['chat', 'image_generation'],
-    badge: 'Recommended',
-    isRecommended: true,
-    features: [
-      { text: 'Unlimited text conversations', included: true },
-      { text: 'Access to OpenRouter models', included: true },
-      { text: 'High-resolution AI Image Creator', included: true, highlight: true },
-      { text: 'Priority low-latency node connections', included: true }
-    ],
-    colorTheme: {
-      borderActive: 'border-cyan-500/30 shadow-cyan-500/5',
-      borderHover: 'hover:border-cyan-500/20',
-      badgeBg: 'bg-gradient-to-r from-indigo-500 to-cyan-500',
-      badgeText: 'text-white',
-      glowBg: 'from-indigo-500/5 to-cyan-500/5'
-    }
-  }
-];
+    const script = document.createElement("script");
+    script.src = "https://checkout.razorpay.com/v1/checkout.js";
+    script.onload = () => resolve(true);
+    script.onerror = () => resolve(false);
+    document.body.appendChild(script);
+  });
+};
+
+const STATIC_PLAN_FEATURES: Record<string, string[]> = {
+  free: ['chat'],
+  pro: ['chat', 'image_generation']
+};
 
 export const hasPlanFeature = (planId: string, featureKey: string): boolean => {
-  const plan = PLANS.find(p => p.id === planId) || PLANS[0];
-  return plan.unlockedFeatures.includes(featureKey);
+  const features = STATIC_PLAN_FEATURES[planId] || STATIC_PLAN_FEATURES['free'];
+  return features.includes(featureKey);
 };
 
 interface SubscriptionModalProps {
@@ -86,15 +37,35 @@ interface SubscriptionModalProps {
 
 export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({ isOpen, onClose }) => {
   const dispatch = useAppDispatch();
-  const { planId } = useAppSelector((state) => state.auth);
+  const { planId, user } = useAppSelector((state) => state.auth);
+  const [plans, setPlans] = useState<Plan[]>([]);
+  const [isPlansLoading, setIsPlansLoading] = useState(true);
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
   const [paymentStep, setPaymentStep] = useState<string>('');
   const [showDowngradeConfirm, setShowDowngradeConfirm] = useState(false);
   const [pendingPlan, setPendingPlan] = useState<Plan | null>(null);
 
+  useEffect(() => {
+    if (isOpen) {
+      loadPlans();
+    }
+  }, [isOpen]);
+
+  const loadPlans = async () => {
+    setIsPlansLoading(true);
+    try {
+      const data = await fetchPlans();
+      setPlans(data);
+    } catch (err) {
+      console.error("Failed to load subscription plans:", err);
+    } finally {
+      setIsPlansLoading(false);
+    }
+  };
+
   if (!isOpen) return null;
 
-  const handleSelectPlan = (targetPlan: Plan) => {
+  const handleSelectPlan = async (targetPlan: Plan) => {
     // If selecting current plan, do nothing
     if (planId === targetPlan.id) return;
 
@@ -107,41 +78,161 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({ isOpen, on
       return;
     }
 
-    // Otherwise, simulate secure Stripe checkout upgrade flow
     setLoadingAction(targetPlan.id);
-    
-    const steps = [
-      'Initializing secure handshake...',
-      'Routing via encrypted SSL proxy...',
-      'Validating payment authorization token...',
-      `Activating ${targetPlan.name} credentials...`
-    ];
+    setPaymentStep('Connecting to billing server...');
 
-    let currentStep = 0;
-    setPaymentStep(steps[0]);
+    try {
+      // 1. Create order on backend
+      const order = await createRazorpayOrder(targetPlan.id);
 
-    const interval = setInterval(() => {
-      currentStep++;
-      if (currentStep < steps.length) {
-        setPaymentStep(steps[currentStep]);
+      if (order.is_mock) {
+        // Mock Checkout Flow Simulation
+        const steps = [
+          'Initializing secure mock handshake...',
+          'Bypassing Razorpay sandbox check...',
+          'Authorizing mock payment token...',
+          `Activating ${targetPlan.name} credentials...`
+        ];
+
+        let currentStep = 0;
+        setPaymentStep(steps[0]);
+
+        const interval = setInterval(async () => {
+          currentStep++;
+          if (currentStep < steps.length) {
+            setPaymentStep(steps[currentStep]);
+          } else {
+            clearInterval(interval);
+            try {
+              // Verify mock payment to save in DB
+              const dummyPayId = 'mock_pay_' + Math.random().toString(36).substring(2, 12);
+              const verification = await verifyRazorpayPayment({
+                razorpay_order_id: order.order_id,
+                razorpay_payment_id: dummyPayId,
+                razorpay_signature: 'mock_signature',
+                plan_id: targetPlan.id
+              });
+              dispatch(changeSubscriptionPlan(verification.plan_id));
+              setLoadingAction(null);
+              setPaymentStep('');
+            } catch (err: any) {
+              alert("Payment verification failed: " + (err.response?.data?.detail || err.message || err));
+              setLoadingAction(null);
+              setPaymentStep('');
+            }
+          }
+        }, 600);
       } else {
-        clearInterval(interval);
-        dispatch(changeSubscriptionPlan(targetPlan.id));
-        setLoadingAction(null);
-        setPaymentStep('');
+        // Real Razorpay Checkout Flow
+        setPaymentStep('Loading payment gateway...');
+        const scriptLoaded = await loadRazorpayScript();
+        if (!scriptLoaded) {
+          alert("Failed to load Razorpay SDK. Please check your network connection.");
+          setLoadingAction(null);
+          setPaymentStep('');
+          return;
+        }
+
+        const options = {
+          key: order.key_id,
+          amount: order.amount,
+          currency: order.currency,
+          name: "Chatty AI",
+          description: `Subscribe to ${targetPlan.name}`,
+          order_id: order.order_id,
+          prefill: {
+            name: user?.full_name || "",
+            email: user?.email || "",
+          },
+          theme: {
+            color: "#6366F1", // Indigo 500
+          },
+          handler: async (response: any) => {
+            setPaymentStep('Verifying payment signature...');
+            try {
+              const verification = await verifyRazorpayPayment({
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature: response.razorpay_signature,
+                plan_id: targetPlan.id
+              });
+              dispatch(changeSubscriptionPlan(verification.plan_id));
+            } catch (err: any) {
+              alert("Payment verification failed: " + (err.response?.data?.detail || err.message || err));
+            } finally {
+              setLoadingAction(null);
+              setPaymentStep('');
+            }
+          },
+          modal: {
+            ondismiss: () => {
+              setLoadingAction(null);
+              setPaymentStep('');
+            }
+          }
+        };
+
+        const rzp = new (window as any).Razorpay(options);
+        rzp.open();
       }
-    }, 600);
+    } catch (err: any) {
+      console.error(err);
+      alert("Error initializing payment: " + (err.response?.data?.detail || err.message || err));
+      setLoadingAction(null);
+      setPaymentStep('');
+    }
   };
 
-  const executeDowngrade = () => {
+  const executeDowngrade = async () => {
     if (!pendingPlan) return;
     setShowDowngradeConfirm(false);
     setLoadingAction(pendingPlan.id);
-    setTimeout(() => {
-      dispatch(changeSubscriptionPlan(pendingPlan.id));
+    setPaymentStep('Cancelling subscription...');
+    try {
+      const response = await cancelSubscription();
+      dispatch(changeSubscriptionPlan(response.plan_id));
+    } catch (err: any) {
+      alert("Failed to cancel subscription: " + (err.response?.data?.detail || err.message || err));
+    } finally {
       setLoadingAction(null);
       setPendingPlan(null);
-    }, 1000);
+      setPaymentStep('');
+    }
+  };
+
+  const getPlanTheme = (id: string) => {
+    if (id === 'free') {
+      return {
+        borderActive: 'border-indigo-500/30 shadow-indigo-500/5',
+        borderHover: 'hover:border-indigo-500/20',
+        badgeBg: 'bg-indigo-600',
+        badgeText: 'text-white',
+        glowBg: 'from-indigo-500/5 to-transparent',
+        badge: undefined as string | undefined,
+        isRecommended: false
+      };
+    } else if (id === 'pro') {
+      return {
+        borderActive: 'border-cyan-500/30 shadow-cyan-500/5',
+        borderHover: 'hover:border-cyan-500/20',
+        badgeBg: 'bg-gradient-to-r from-indigo-500 to-cyan-500',
+        badgeText: 'text-white',
+        glowBg: 'from-indigo-500/5 to-cyan-500/5',
+        badge: 'Recommended',
+        isRecommended: true
+      };
+    } else {
+      // Default theme for any custom database-added plans
+      return {
+        borderActive: 'border-purple-500/30 shadow-purple-500/5',
+        borderHover: 'hover:border-purple-500/20',
+        badgeBg: 'bg-purple-600',
+        badgeText: 'text-white',
+        glowBg: 'from-purple-500/5 to-transparent',
+        badge: undefined,
+        isRecommended: false
+      };
+    }
   };
 
   return (
@@ -183,7 +274,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({ isOpen, on
           </p>
         </div>
 
-        {/* Loader Simulation View */}
+        {/* Dynamic content rendering based on loading states */}
         {loadingAction && loadingAction !== 'free' ? (
           <div className="flex flex-col items-center justify-center py-16 animate-fadeIn">
             <div className="relative w-16 h-16 mb-6">
@@ -193,24 +284,23 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({ isOpen, on
             <p className="text-sm font-semibold text-white tracking-wide text-center">{paymentStep}</p>
             <p className="text-xs text-zinc-500 mt-2">SSL Secure Encryption Sandbox</p>
           </div>
+        ) : isPlansLoading ? (
+          <div className="flex flex-col items-center justify-center py-16 animate-fadeIn">
+            <Loader2 className="w-12 h-12 text-indigo-500 animate-spin mb-4" />
+            <p className="text-sm text-zinc-400">Loading subscription plans...</p>
+          </div>
         ) : (
           /* Cards Grid - Dynamically supports any number of plans */
           <div className={`grid grid-cols-1 gap-6 overflow-y-auto pt-4 pb-2 px-1 scrollbar-none max-h-[60vh] md:max-h-none ${
-            PLANS.length === 1 
+            plans.length === 1 
               ? 'justify-center max-w-md mx-auto' 
-              : PLANS.length === 2 
+              : plans.length === 2 
                 ? 'md:grid-cols-2 max-w-3xl mx-auto' 
                 : 'md:grid-cols-3'
           }`}>
-            {PLANS.map((plan) => {
+            {plans.map((plan) => {
               const isActive = planId === plan.id;
-              const theme = plan.colorTheme || {
-                borderActive: 'border-indigo-500/30',
-                borderHover: 'hover:border-indigo-500/20',
-                badgeBg: 'bg-indigo-600',
-                badgeText: 'text-white',
-                glowBg: 'from-indigo-500/5 to-transparent'
-              };
+              const theme = getPlanTheme(plan.id);
 
               return (
                 <div 
@@ -230,16 +320,16 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({ isOpen, on
                       Active
                     </span>
                   )}
-                  {!isActive && plan.badge && (
+                  {!isActive && theme.badge && (
                     <span className={`absolute -top-3 right-4 ${theme.badgeBg} ${theme.badgeText} text-[9px] font-extrabold px-2.5 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-1 shadow-md shadow-indigo-500/10`}>
-                      <Zap className="w-2.5 h-2.5 fill-white text-white animate-bounce" /> {plan.badge}
+                      <Zap className="w-2.5 h-2.5 fill-white text-white animate-bounce" /> {theme.badge}
                     </span>
                   )}
 
                   <div>
                     <div className="flex items-center gap-2 mb-1">
                       <h3 className="text-lg font-bold text-white">{plan.name}</h3>
-                      {plan.isRecommended && <Zap className="w-4 h-4 text-cyan-400 fill-cyan-400/20" />}
+                      {theme.isRecommended && <Zap className="w-4 h-4 text-cyan-400 fill-cyan-400/20" />}
                     </div>
                     <p className="text-xs text-zinc-500 mb-4">{plan.description}</p>
                     <div className="flex items-baseline gap-1 mb-6">
@@ -282,7 +372,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({ isOpen, on
                       onClick={() => handleSelectPlan(plan)}
                       disabled={loadingAction !== null}
                       className={`w-full py-2.5 text-xs font-semibold rounded-xl text-center cursor-pointer transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0 ${
-                        plan.isRecommended 
+                        theme.isRecommended 
                           ? 'bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white shadow-lg shadow-indigo-600/15'
                           : 'bg-white/5 hover:bg-white/10 border border-white/5 text-zinc-300 hover:text-white'
                       }`}

@@ -2,7 +2,6 @@
 
 import React, { useState } from 'react';
 import { ChatSession } from '@/types/chat';
-import { PLANS } from './SubscriptionModal';
 import {
   Plus,
   Search,
@@ -284,17 +283,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </span>
             </div>
             <div className="mt-2 flex items-center gap-1.5">
-              {(() => {
-                const activePlan = PLANS.find(p => p.id === user.planId) || PLANS[0];
-                return (
-                  <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-md uppercase tracking-wider ${activePlan.id !== 'free'
-                    ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 shadow-[0_0_10px_rgba(6,182,212,0.1)]'
-                    : 'bg-zinc-800 text-zinc-400 border border-white/5'
-                    }`}>
-                    {activePlan.name}
-                  </span>
-                );
-              })()}
+              <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-md uppercase tracking-wider ${user.planId === 'pro'
+                ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 shadow-[0_0_10px_rgba(6,182,212,0.1)]'
+                : 'bg-zinc-800 text-zinc-400 border border-white/5'
+                }`}>
+                {user.planId === 'pro' ? 'Chatty Pro' : 'Chatty Free'}
+              </span>
               {onOpenSubscription && (
                 <button
                   type="button"

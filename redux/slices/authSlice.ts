@@ -146,7 +146,11 @@ const authSlice = createSlice({
       try {
         const savedUser = localStorage.getItem("user");
         if (savedUser) {
-          state.user = JSON.parse(savedUser);
+          const parsedUser = JSON.parse(savedUser);
+          state.user = parsedUser;
+          if (parsedUser.plan_id) {
+            state.planId = parsedUser.plan_id;
+          }
         }
         const savedPlanId = localStorage.getItem("subscription_plan_id");
         if (savedPlanId) {
@@ -194,6 +198,10 @@ const authSlice = createSlice({
       .addCase(registerUserThunk.fulfilled, (state, action) => {
         state.status = "succeeded";
         state.user = action.payload;
+        if (action.payload.plan_id) {
+          state.planId = action.payload.plan_id;
+          localStorage.setItem("subscription_plan_id", action.payload.plan_id);
+        }
       })
       .addCase(registerUserThunk.rejected, (state, action) => {
         state.status = "failed";
@@ -209,6 +217,10 @@ const authSlice = createSlice({
         state.user = action.payload;
         state.token = action.payload.token || null;
         state.isAuthenticated = !!action.payload.token;
+        if (action.payload.plan_id) {
+          state.planId = action.payload.plan_id;
+          localStorage.setItem("subscription_plan_id", action.payload.plan_id);
+        }
       })
       .addCase(loginUserThunk.rejected, (state, action) => {
         state.status = "failed";
@@ -228,6 +240,10 @@ const authSlice = createSlice({
         state.user = action.payload;
         state.token = action.payload.token || null;
         state.isAuthenticated = !!action.payload.token;
+        if (action.payload.plan_id) {
+          state.planId = action.payload.plan_id;
+          localStorage.setItem("subscription_plan_id", action.payload.plan_id);
+        }
       })
       .addCase(otpVerifyThunk.rejected, (state, action) => {
         state.status = "failed";

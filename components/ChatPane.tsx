@@ -8,8 +8,8 @@ import { hasPlanFeature } from './SubscriptionModal';
 interface ChatPaneProps {
   activeChat: ChatSession;
   isResponding: boolean;
-  selectedModel: 'deepseek-v3' | 'deepseek-r1' | 'claude-3-5-sonnet' | 'gpt-4o';
-  setSelectedModel: (val: 'deepseek-v3' | 'deepseek-r1' | 'claude-3-5-sonnet' | 'gpt-4o') => void;
+  selectedModel: 'free' | 'pro';
+  setSelectedModel: (val: 'free' | 'pro') => void;
   isSidebarOpen: boolean;
   setIsSidebarOpen: (val: boolean) => void;
   handleSendMessage: (textToSend: string) => void;
@@ -138,13 +138,18 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
             <div className="relative">
               <select
                 value={selectedModel}
-                onChange={(e) => setSelectedModel(e.target.value as any)}
+                onChange={(e) => {
+                  const val = e.target.value as 'free' | 'pro';
+                  if (val === 'pro' && userPlanId !== 'pro') {
+                    onTriggerSubscription();
+                  } else {
+                    setSelectedModel(val);
+                  }
+                }}
                 className="bg-slate-900 border border-white/10 hover:border-white/20 text-white rounded-xl text-xs font-semibold py-1.5 pl-3 pr-8 focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer appearance-none"
               >
-                <option value="deepseek-v3">🇨🇳 DeepSeek V3 (Default)</option>
-                <option value="deepseek-r1">🧠 DeepSeek R1 (Reasoning)</option>
-                <option value="claude-3-5-sonnet">🎭 Claude 3.5 Sonnet</option>
-                <option value="gpt-4o">🤖 GPT-4o</option>
+                <option value="free">🆓 Free (Gemini 2.5 Flash)</option>
+                <option value="pro">⚡ Pro (Gemini 2.5 Pro)</option>
               </select>
               <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-zinc-400">
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -181,7 +186,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
             activeChat.messages.map((msg) => (
               <div
                 key={msg.id}
-                className={`flex gap-4 max-w-5xl mx-auto group ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}
+                className={`flex gap-4 max-w-5xl mx-auto group max-lg:pb-4 ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}
               >
                 {/* Assistant profile icon */}
                 {msg.sender === 'assistant' && (
@@ -205,10 +210,10 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                 >
                   {/* Floating Toolbar (User / Left side of bubble) */}
                   {editingId !== msg.id && msg.sender === 'user' && (
-                    <div className="absolute right-full mr-3.5 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 bg-slate-950/95 border border-white/10 backdrop-blur-md rounded-xl p-1 flex items-center gap-1 shadow-2xl select-none z-20 max-lg:opacity-100 max-lg:relative max-lg:top-auto max-lg:right-auto max-lg:translate-y-0 max-lg:mr-0 max-lg:mt-2 max-lg:bg-transparent max-lg:border-0 max-lg:shadow-none max-lg:p-0 max-lg:justify-end">
+                    <div className="absolute right-full mr-3.5 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 bg-slate-950/95 border border-white/10 backdrop-blur-md rounded-xl p-1 flex items-center gap-1 shadow-2xl select-none z-20 max-lg:opacity-100 max-lg:absolute max-lg:top-full max-lg:right-1 max-lg:left-auto max-lg:translate-y-0 max-lg:mr-0 max-lg:mt-1 max-lg:bg-transparent max-lg:border-0 max-lg:shadow-none max-lg:p-0 max-lg:justify-end max-lg:w-fit max-lg:ml-auto">
                       <button
                         onClick={() => handleStartEdit(msg.id, msg.text)}
-                        className="p-1.5 text-zinc-400 hover:text-white hover:bg-white/5 rounded-lg transition-colors cursor-pointer flex items-center justify-center max-lg:p-1 max-lg:text-white/70 max-lg:hover:bg-white/10"
+                        className="w-7 h-7 text-zinc-400 hover:text-white hover:bg-white/5 rounded-lg transition-colors cursor-pointer flex items-center justify-center flex-shrink-0 max-lg:text-white/70 max-lg:hover:bg-white/10"
                         title="Edit Prompt"
                       >
                         <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -217,7 +222,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                       </button>
                       <button
                         onClick={() => handleCopyText(msg.id, msg.text)}
-                        className={`p-1.5 rounded-lg transition-colors cursor-pointer flex items-center justify-center max-lg:p-1 ${copiedId === msg.id
+                        className={`w-7 h-7 rounded-lg transition-colors cursor-pointer flex items-center justify-center flex-shrink-0 ${copiedId === msg.id
                           ? 'bg-emerald-500/20 text-emerald-400'
                           : 'text-zinc-400 hover:text-white hover:bg-white/5 max-lg:text-white/70 max-lg:hover:bg-white/10'
                           }`}
@@ -238,10 +243,10 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 
                   {/* Floating Toolbar (Assistant / Right side of bubble) */}
                   {editingId !== msg.id && msg.sender === 'assistant' && (
-                    <div className="absolute left-full ml-3.5 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 bg-slate-950/95 border border-white/10 backdrop-blur-md rounded-xl p-1 flex items-center gap-1 shadow-2xl select-none z-20 max-lg:opacity-100 max-lg:relative max-lg:top-auto max-lg:left-auto max-lg:translate-y-0 max-lg:ml-0 max-lg:mt-2 max-lg:bg-transparent max-lg:border-0 max-lg:shadow-none max-lg:p-0 max-lg:justify-start">
+                    <div className="absolute left-full ml-3.5 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 bg-slate-950/95 border border-white/10 backdrop-blur-md rounded-xl p-1 flex items-center gap-1 shadow-2xl select-none z-20 max-lg:opacity-100 max-lg:absolute max-lg:top-full max-lg:left-1 max-lg:right-auto max-lg:translate-y-0 max-lg:ml-0 max-lg:mt-1 max-lg:bg-transparent max-lg:border-0 max-lg:shadow-none max-lg:p-0 max-lg:justify-start max-lg:w-fit max-lg:mr-auto">
                       <button
                         onClick={() => handleCopyText(msg.id, msg.text)}
-                        className={`p-1.5 rounded-lg transition-colors cursor-pointer flex items-center justify-center max-lg:p-1 ${copiedId === msg.id
+                        className={`w-7 h-7 rounded-lg transition-colors cursor-pointer flex items-center justify-center flex-shrink-0 ${copiedId === msg.id
                           ? 'bg-emerald-500/20 text-emerald-400'
                           : 'text-zinc-400 hover:text-white hover:bg-white/5 max-lg:text-zinc-400 max-lg:hover:bg-white/5'
                           }`}

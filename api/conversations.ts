@@ -40,6 +40,7 @@ export interface StreamCallbacks {
 export async function sendMessageStream(
   sessionId: string,
   text: string,
+  model: 'free' | 'pro',
   callbacks: StreamCallbacks,
   signal?: AbortSignal
 ): Promise<void> {
@@ -53,7 +54,7 @@ export async function sendMessageStream(
       "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, model }),
     signal,
   });
 
@@ -112,6 +113,7 @@ export async function editMessageStream(
   sessionId: string,
   messageId: string,
   text: string,
+  model: 'free' | 'pro',
   callbacks: StreamCallbacks,
   signal?: AbortSignal
 ): Promise<void> {
@@ -125,7 +127,7 @@ export async function editMessageStream(
       "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, model }),
     signal,
   });
 

@@ -23,6 +23,8 @@ export interface IUserResponse {
     otp_code?: string | null;
     otp_created_at?: string | null;
     token?: string;
+    plan_id?: string;
+    subscription_expires_at?: string;
     created_at: string;
     updated_at: string;
 }

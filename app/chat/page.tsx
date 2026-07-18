@@ -29,7 +29,7 @@ export default function ChatPage() {
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [isResponding, setIsResponding] = useState(false);
   const [isMessagesLoading, setIsMessagesLoading] = useState(false);
-  const [selectedModel, setSelectedModel] = useState<'deepseek-v3' | 'deepseek-r1' | 'claude-3-5-sonnet' | 'gpt-4o'>('deepseek-v3');
+  const [selectedModel, setSelectedModel] = useState<'free' | 'pro'>('free');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isSubscriptionModalOpen, setIsSubscriptionModalOpen] = useState(false);
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
@@ -197,6 +197,7 @@ export default function ChatPage() {
       await sendMessageStream(
         activeChatId,
         text,
+        selectedModel,
         {
           onUserMessage: (dbUserMsg) => {
             setChats(prevChats =>
@@ -386,6 +387,7 @@ export default function ChatPage() {
         activeChatId,
         messageId,
         text,
+        selectedModel,
         {
           onHistory: (historyMessages) => {
             console.log("History:", historyMessages);
